@@ -174,3 +174,24 @@ async def update_component(component_id: str, updates: Dict[str, Any]) -> Option
 async def delete_component(component_id: str) -> bool:
     result = await _col().delete_one({"id": component_id})
     return result.deleted_count > 0
+
+
+async def get_component_domains(component_id: str) -> List[str]:
+    """Return the declared policy domains for a component, or [] if none."""
+    comp = await get_component(component_id)
+    return comp.get("domains", []) if comp else []
+
+
+async def find_component_by_source(source: str) -> Optional[Dict[str, Any]]:
+    """
+    Find a component by exact id match first, then by case-insensitive name search.
+    Used by inbound_events to map a source string to a registered component.
+    """
+    comp = await get_component(source)
+    if comp:
+        return comp
+    import re as _re
+    return await _col().find_one(
+        {"name": {"$regex": _re.escape(source), "$options": "i"}},
+        {"_id": 0},
+    )

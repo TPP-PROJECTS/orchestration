@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Clock } from "lucide-react";
+import { Clock, Library, Link } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -134,11 +134,35 @@ const RuleCard: React.FC<RuleCardProps> = ({
         )}
       </div>
 
-      <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
+      <div className="flex items-center gap-4 mt-3 text-xs text-gray-500 flex-wrap">
         <span className="flex items-center gap-1">
           <Clock className="h-3 w-3" />
           {formatDate(rule.lastModified)}
         </span>
+        {rule.tier && (
+          <span
+            className={cn(
+              "px-1.5 py-0.5 rounded-full font-medium",
+              rule.tier === "external" ? "bg-blue-100 text-blue-700" :
+              rule.tier === "internal" ? "bg-purple-100 text-purple-700" :
+              "bg-gray-100 text-gray-600",
+            )}
+          >
+            {rule.tier}
+          </span>
+        )}
+        {rule.libraryName && (
+          <span className="flex items-center gap-1 text-gray-400">
+            <Library className="h-3 w-3" />
+            {rule.libraryName}
+          </span>
+        )}
+        {rule.componentName && (
+          <span className="flex items-center gap-1 text-gray-400">
+            <Link className="h-3 w-3" />
+            {rule.componentName}
+          </span>
+        )}
       </div>
     </div>
   );

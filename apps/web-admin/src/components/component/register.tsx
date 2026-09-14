@@ -965,6 +965,10 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
   const [isAddExternalOpen, setIsAddExternalOpen] = React.useState(false);
   const [externalToDelete, setExternalToDelete] = React.useState<ExternalComponent | null>(null);
   const [testingExternal, setTestingExternal] = React.useState<string | null>(null);
+  const [editingExternal, setEditingExternal] = React.useState<ExternalComponent | null>(null);
+  const [editExternalForm, setEditExternalForm] = React.useState({
+    name: "", description: "", endpoint: "", auth_token: "", connection_type: "http" as "http" | "ws" | "openclaw",
+  });
   const [newExternal, setNewExternal] = React.useState({
     name: "",
     description: "",
@@ -973,6 +977,9 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
     auth_token: "",
     trustWorthys: [] as string[],
     trustWorthyDescription: "",
+    domains: [] as string[],
+    domainInput: "",
+    policyFiles: [] as File[],
   });
 
   const fetchExternalComponents = React.useCallback(async () => {
@@ -1004,9 +1011,29 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
           auth_token: newExternal.auth_token || undefined,
           trustWorthys: newExternal.trustWorthys.length > 0 ? newExternal.trustWorthys : undefined,
           trustWorthyDescription: newExternal.trustWorthyDescription || undefined,
+          domains: newExternal.domains.length > 0 ? newExternal.domains : undefined,
         }),
       });
       if (res.ok) {
+        const data = await res.json() as { id: string };
+        // Upload internal policy documents — each file becomes one Policy Library
+        // parsed by LLM via /api/policy-libraries/import
+        if (newExternal.policyFiles.length > 0) {
+          await Promise.all(
+            newExternal.policyFiles.map((f) => {
+              const form = new FormData();
+              form.append("file", f);
+              form.append("tier", "internal");
+              form.append("inference_model", "general_llm");
+              form.append("component_id", data.id);
+              form.append("component_name", newExternal.name);
+              return fetch(`${apiBase}/api/policy-libraries/import`, {
+                method: "POST",
+                body: form,
+              });
+            }),
+          );
+        }
         await fetchExternalComponents();
         setIsAddExternalOpen(false);
         setNewExternal({
@@ -1017,6 +1044,9 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
           auth_token: "",
           trustWorthys: [],
           trustWorthyDescription: "",
+          domains: [],
+          domainInput: "",
+          policyFiles: [],
         });
       }
     } catch {
@@ -1043,6 +1073,40 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
       // ignore errors
     } finally {
       setTestingExternal(null);
+    }
+  };
+
+  const openEditExternal = (comp: ExternalComponent) => {
+    setEditingExternal(comp);
+    setEditExternalForm({
+      name: comp.name,
+      description: comp.description ?? "",
+      endpoint: comp.endpoint,
+      auth_token: comp.auth_token ?? "",
+      connection_type: comp.connection_type,
+    });
+  };
+
+  const handleUpdateExternal = async () => {
+    if (!editingExternal) return;
+    try {
+      const res = await fetch(`${apiBase}/api/external/components/${editingExternal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editExternalForm.name || undefined,
+          description: editExternalForm.description || undefined,
+          endpoint: editExternalForm.endpoint || undefined,
+          auth_token: editExternalForm.auth_token || undefined,
+          connection_type: editExternalForm.connection_type,
+        }),
+      });
+      if (res.ok) {
+        await fetchExternalComponents();
+        setEditingExternal(null);
+      }
+    } catch {
+      // ignore errors
     }
   };
 
@@ -1807,6 +1871,15 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="h-7 px-2"
+                        onClick={() => openEditExternal(comp)}
+                        title="Edit component"
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         className="h-7 px-2 text-destructive hover:text-destructive"
                         onClick={() => setExternalToDelete(comp)}
                       >
@@ -2175,7 +2248,7 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
 
       {/* Register External Component Dialog */}
       <Dialog open={isAddExternalOpen} onOpenChange={setIsAddExternalOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ExternalLink className="h-5 w-5" />
@@ -2186,6 +2259,7 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
               governed and forwarded to this component's HTTP endpoint.
             </DialogDescription>
           </DialogHeader>
+          <div className="flex-1 overflow-y-auto">
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="ext-name">Name</Label>
@@ -2255,6 +2329,76 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
                 onChange={(e) => setNewExternal({ ...newExternal, auth_token: e.target.value })}
               />
             </div>
+            {/* External Policy Domains */}
+            <div className="space-y-2">
+              <Label>Policy Domains (Optional)</Label>
+              <p className="text-xs text-muted-foreground">
+                Describe the domains this component operates in. The system will automatically search for
+                applicable <span className="font-medium">external regulations</span> (e.g. GDPR, HIPAA, FERPA)
+                and store them as policy rules.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder='e.g. "K-12 student data privacy" or "medical AI diagnostics"'
+                  value={newExternal.domainInput}
+                  onChange={(e) => setNewExternal({ ...newExternal, domainInput: e.target.value })}
+                  onKeyDown={(e) => {
+                    if ((e.key === "Enter" || e.key === ",") && newExternal.domainInput.trim()) {
+                      e.preventDefault();
+                      const tag = newExternal.domainInput.trim().replace(/,$/, "");
+                      if (tag && !newExternal.domains.includes(tag)) {
+                        setNewExternal((prev) => ({
+                          ...prev,
+                          domains: [...prev.domains, tag],
+                          domainInput: "",
+                        }));
+                      }
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="shrink-0 px-3 py-1 text-sm rounded border border-input bg-background hover:bg-accent disabled:opacity-40"
+                  disabled={!newExternal.domainInput.trim()}
+                  onClick={() => {
+                    const tag = newExternal.domainInput.trim();
+                    if (tag && !newExternal.domains.includes(tag)) {
+                      setNewExternal((prev) => ({
+                        ...prev,
+                        domains: [...prev.domains, tag],
+                        domainInput: "",
+                      }));
+                    }
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+              {newExternal.domains.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {newExternal.domains.map((d, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+                    >
+                      {d}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setNewExternal((prev) => ({
+                            ...prev,
+                            domains: prev.domains.filter((_, j) => j !== i),
+                          }))
+                        }
+                        className="hover:text-destructive"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="space-y-2">
               <Label>Trustworthy Options</Label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -2301,7 +2445,70 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
                 onChange={(e) => setNewExternal({ ...newExternal, description: e.target.value })}
               />
             </div>
+            {/* Internal Policy Documents */}
+            <div className="space-y-2">
+              <Label>Internal Policy Documents (Optional)</Label>
+              <p className="text-xs text-muted-foreground">
+                Upload your organization's policy files (e.g. school handbook, company code of conduct).
+                These become <span className="font-medium">internal-tier</span> rules evaluated against every message this component sends or receives.
+                Accepted: .txt, .md, .pdf (text)
+              </p>
+              <div
+                className="border-2 border-dashed border-muted rounded-md p-4 text-center cursor-pointer hover:border-primary transition-colors"
+                onClick={() => document.getElementById("policy-file-input")?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const dropped = Array.from(e.dataTransfer.files);
+                  setNewExternal((prev) => ({
+                    ...prev,
+                    policyFiles: [...prev.policyFiles, ...dropped],
+                  }));
+                }}
+              >
+                <input
+                  id="policy-file-input"
+                  type="file"
+                  multiple
+                  accept=".txt,.md,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.files ?? []);
+                    setNewExternal((prev) => ({
+                      ...prev,
+                      policyFiles: [...prev.policyFiles, ...selected],
+                    }));
+                    e.target.value = "";
+                  }}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Click or drag &amp; drop policy files here
+                </p>
+              </div>
+              {newExternal.policyFiles.length > 0 && (
+                <ul className="space-y-1 mt-1">
+                  {newExternal.policyFiles.map((f, i) => (
+                    <li key={i} className="flex items-center justify-between text-sm bg-muted/40 rounded px-2 py-1">
+                      <span className="truncate max-w-[220px]">{f.name}</span>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive ml-2 shrink-0"
+                        onClick={() =>
+                          setNewExternal((prev) => ({
+                            ...prev,
+                            policyFiles: prev.policyFiles.filter((_, j) => j !== i),
+                          }))
+                        }
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
+          </div>{/* end scroll wrapper */}
           <DialogFooter>
             <Button
               variant="outline"
@@ -2315,6 +2522,9 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
                   auth_token: "",
                   trustWorthys: [],
                   trustWorthyDescription: "",
+                  domains: [],
+                  domainInput: "",
+                  policyFiles: [],
                 });
               }}
             >
@@ -2325,6 +2535,59 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
               disabled={!newExternal.name || !newExternal.endpoint}
             >
               Register
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit External Component Dialog */}
+      <Dialog open={!!editingExternal} onOpenChange={(o) => { if (!o) setEditingExternal(null); }}>
+        <DialogContent className="max-w-md max-h-[80vh] flex flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Edit External Component</DialogTitle>
+            <DialogDescription>Update the registration details for this component.</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto">
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input value={editExternalForm.name} onChange={(e) => setEditExternalForm({ ...editExternalForm, name: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>Connection Type</Label>
+              <div className="flex gap-2">
+                {(["http", "ws", "openclaw"] as const).map((t) => (
+                  <Button
+                    key={t}
+                    type="button"
+                    size="sm"
+                    variant={editExternalForm.connection_type === t ? "default" : "outline"}
+                    onClick={() => setEditExternalForm({ ...editExternalForm, connection_type: t })}
+                  >
+                    {t.toUpperCase()}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Endpoint URL</Label>
+              <Input value={editExternalForm.endpoint} onChange={(e) => setEditExternalForm({ ...editExternalForm, endpoint: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>Bearer Token (Optional)</Label>
+              <Input type="password" value={editExternalForm.auth_token} onChange={(e) => setEditExternalForm({ ...editExternalForm, auth_token: e.target.value })} placeholder="Leave empty to keep unchanged" />
+            </div>
+            <div className="space-y-2">
+              <Label>Description (Optional)</Label>
+              <Input value={editExternalForm.description} onChange={(e) => setEditExternalForm({ ...editExternalForm, description: e.target.value })} />
+            </div>
+          </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingExternal(null)}>Cancel</Button>
+            <Button onClick={handleUpdateExternal} disabled={!editExternalForm.name || !editExternalForm.endpoint}>
+              <Save className="h-4 w-4 mr-2" />
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>

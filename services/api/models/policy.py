@@ -12,6 +12,12 @@ import time
 PolicyType = Literal["system", "input", "output"]
 PolicyStatus = Literal["active", "inactive", "draft"]
 
+# Three-tier hierarchy — determines authority and evaluation priority.
+#   external: legally binding obligations (government regulations, privacy laws)
+#   internal: organization-specific rules uploaded by the component owner
+#   implicit: ethical/moral baselines that apply everywhere
+PolicyTier = Literal["external", "internal", "implicit"]
+
 
 class PolicyRule(BaseModel):
     """A single policy rule."""
@@ -21,6 +27,9 @@ class PolicyRule(BaseModel):
     content: str  # The actual policy text/rule
     severity: Literal["block", "warn", "info"] = "block"
     enabled: bool = True
+    # Persisted/operational rules are organizational rules by default.  The
+    # implicit tier is evaluated directly by the LLM and has no stored rules.
+    tier: PolicyTier = "internal"
     # Source traceability
     source_document: Optional[str] = None
     source_section: Optional[str] = None
@@ -32,11 +41,16 @@ class Policy(BaseModel):
     name: str
     description: Optional[str] = None
     type: PolicyType
+    tier: PolicyTier = "internal"
     status: PolicyStatus = "active"
     rules: List[PolicyRule] = []
     created_at: int = Field(default_factory=lambda: int(time.time() * 1000))
     updated_at: int = Field(default_factory=lambda: int(time.time() * 1000))
     version: str = "1.0"
+    # For internal-tier policies: the component that owns this policy
+    component_id: Optional[str] = None
+    # For internal-tier policies: original uploaded filename(s)
+    source_files: List[str] = []
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -62,6 +76,8 @@ class PolicyEvaluationRequest(BaseModel):
     content: str
     policy_type: PolicyType
     context: Optional[Dict[str, Any]] = None  # Additional context (e.g., history)
+    domains: Optional[List[str]] = None
+    component_id: Optional[str] = None
 
 
 class PolicyViolation(BaseModel):
@@ -70,6 +86,7 @@ class PolicyViolation(BaseModel):
     policy_name: str
     rule_id: str
     rule_name: str
+    tier: PolicyTier = "implicit"
     severity: Literal["block", "warn", "info"]
     reason: str
     suggestion: Optional[str] = None
@@ -78,6 +95,14 @@ class PolicyViolation(BaseModel):
     rule_content: Optional[str] = None
     source_document: Optional[str] = None
     source_section: Optional[str] = None
+    library_id: Optional[str] = None
+    library_name: Optional[str] = None
+
+
+class TierSummary(BaseModel):
+    external: Literal["PASS", "FAIL", "NOT_EVALUATED"] = "NOT_EVALUATED"
+    internal: Literal["PASS", "FAIL", "NOT_EVALUATED"] = "NOT_EVALUATED"
+    implicit: Literal["PASS", "FAIL", "NOT_EVALUATED"] = "NOT_EVALUATED"
 
 
 class PolicyEvaluationResult(BaseModel):
@@ -88,6 +113,7 @@ class PolicyEvaluationResult(BaseModel):
     evaluation_time_ms: int = 0
     decision: Literal["ALLOW", "BLOCK", "WARN"] = "ALLOW"
     summary: Optional[str] = None
+    tier_summary: Optional[TierSummary] = None
 
 
 class PolicyListResponse(BaseModel):

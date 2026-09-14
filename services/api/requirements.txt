@@ -13,3 +13,4 @@ sse-starlette==3.1.2
 cryptography==46.0.3
 jsonschema==4.26.0
 websockets==13.1
+pypdf>=4.0.0

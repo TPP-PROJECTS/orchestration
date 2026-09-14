@@ -24,6 +24,7 @@ from middleware import HttpLoggingMiddleware
 from db import MongoStore
 from services.mcp_manager import mcp_manager
 from services.policy_engine import policy_engine
+from services.skill_manager import skill_manager
 from services.message_queue import message_queue
 from services.openclaw_gateway_client import OpenClawGatewayClient
 from services.openclaw_local_reader import openclaw_local_reader
@@ -67,6 +68,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[API] Failed to initialize policy engine: {e}")
 
+    # Initialize Skill Manager (uploads SKILL.md files to Anthropic API if not cached)
+    try:
+        await skill_manager.initialize()
+        print("[API] Skill manager initialized")
+    except Exception as e:
+        print(f"[API] Failed to initialize skill manager: {e}")
+
     # Start OpenClaw local reader (workspace files, transcripts, mDNS) — always on
     try:
         await openclaw_local_reader.start()
@@ -109,6 +117,7 @@ async def lifespan(app: FastAPI):
         try:
             from modules.policy import db as policy_db
             await policy_db.ensure_indexes()
+            await policy_db.ensure_library_indexes()
             await policy_db.seed_default_rules()
             print("[API] Policy module initialized")
         except Exception as e:
@@ -191,8 +200,10 @@ from routers import (
     logs_router,
     comm_logs_router,
     external_registry_router,
+    inbound_events_router,
     knowledge_rules_router,
 )
+from routers.policy_library import router as policy_library_router
 
 app.include_router(health_router)
 app.include_router(stream_router)
@@ -206,7 +217,9 @@ app.include_router(policy_router)
 app.include_router(logs_router)
 app.include_router(comm_logs_router)
 app.include_router(external_registry_router)
+app.include_router(inbound_events_router)
 app.include_router(knowledge_rules_router)
+app.include_router(policy_library_router)
 
 
 # Root endpoint

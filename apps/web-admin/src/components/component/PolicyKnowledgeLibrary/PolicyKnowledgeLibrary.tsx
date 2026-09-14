@@ -2,7 +2,8 @@
 // Fetches rules from the backend API (GET /api/knowledge-rules).
 // Supports create, edit, and delete via API.
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { Search, X, FileText, Plus, ArrowUpDown, Loader2 } from "lucide-react";
+import { Search, X, FileText, Plus, ArrowUpDown, Loader2, Library, Shield, Sparkles, Database, Globe, Cpu, Link, Clock } from "lucide-react";
+// Library/Shield/Sparkles/Database/Globe/Cpu/Link/Clock used in library card render below
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,14 +18,48 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
-import type { Rule, FilterOptions, FilterState } from "./types";
-import { DEFAULT_FILTER_OPTIONS } from "./constants";
+import type { Rule, FilterOptions, FilterState, PolicyLibrary } from "./types";
+import { DEFAULT_FILTER_OPTIONS, formatDate } from "./constants";
 import FilterPanel from "./FilterPanel";
 import RuleCard from "./RuleCard";
 import RuleDetailDrawer from "./RuleDetailDrawer";
 import RuleFormDialog from "./RuleFormDialog";
+import LibraryDetailDrawer from "./LibraryDetailDrawer";
 
 const API_BASE = "/api/knowledge-rules";
+const LIBRARY_API = "/api/policy-libraries";
+
+async function fetchLibraries(): Promise<PolicyLibrary[]> {
+  const res = await fetch(LIBRARY_API);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function fetchRulesByLibrary(libraryId: string): Promise<Rule[]> {
+  const res = await fetch(`${API_BASE}?library_id=${encodeURIComponent(libraryId)}&limit=500`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+const MODEL_LABEL: Record<string, string> = {
+  general_llm: "LLM",
+  rdr: "RDR",
+  knowledge_graph: "Knowledge Graph",
+  neural_network: "Neural Network",
+};
+
+const MODEL_ICON: Record<string, React.ReactNode> = {
+  rdr:             <Database className="h-3 w-3" />,
+  knowledge_graph: <Globe className="h-3 w-3" />,
+  neural_network:  <Cpu className="h-3 w-3" />,
+  general_llm:     <Sparkles className="h-3 w-3" />,
+};
+
+const TIER_STYLE: Record<string, string> = {
+  external: "bg-blue-50 border-blue-200 text-blue-800",
+  internal: "bg-purple-50 border-purple-200 text-purple-800",
+  implicit: "bg-gray-50 border-gray-200 text-gray-700",
+};
 
 async function fetchRules(filters: FilterState, sortBy: string): Promise<Rule[]> {
   const params = new URLSearchParams();
@@ -73,8 +108,12 @@ async function deleteRule(id: string): Promise<void> {
 // ============ Main Component ============
 export default function PolicyKnowledgeLibrary() {
   const [rules, setRules] = useState<Rule[]>([]);
+  const [libraries, setLibraries] = useState<PolicyLibrary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [selectedLibrary, setSelectedLibrary] = useState<PolicyLibrary | null>(null);
+  const [librarySheetOpen, setLibrarySheetOpen] = useState(false);
 
   const [filters, setFilters] = useState<FilterState>({
     domains: [],
@@ -95,7 +134,7 @@ export default function PolicyKnowledgeLibrary() {
 
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const viewMode = "list" as const;
+  const viewMode: "list" | "grid" = "list";
   const [sortBy, setSortBy] = useState<string>("lastModified");
 
   const [newRuleDialogOpen, setNewRuleDialogOpen] = useState(false);
@@ -119,6 +158,10 @@ export default function PolicyKnowledgeLibrary() {
   useEffect(() => {
     loadRules();
   }, [loadRules]);
+
+  useEffect(() => {
+    fetchLibraries().then(setLibraries).catch(() => {});
+  }, []);
 
   // ---- Client-side sort (backend returns pre-sorted, this is a safety net) ----
   const sortedRules = useMemo(() => {
@@ -144,6 +187,11 @@ export default function PolicyKnowledgeLibrary() {
   }, [rules, sortBy]);
 
   // ---- Handlers ----
+  const handleLibraryClick = (lib: PolicyLibrary) => {
+    setSelectedLibrary(lib);
+    setLibrarySheetOpen(true);
+  };
+
   const handleRuleClick = (rule: Rule) => {
     setSelectedRule(rule);
     setDrawerOpen(true);
@@ -299,6 +347,82 @@ export default function PolicyKnowledgeLibrary() {
               </div>
             )}
 
+            {/* Policy Library cards — one per uploaded document from component registration */}
+            {libraries.length > 0 && (
+              <div className="mb-6">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+                  Policy Libraries ({libraries.length})
+                </p>
+                <div className="space-y-3">
+                  {libraries.map((lib) => (
+                    <div
+                      key={lib.id}
+                      className="p-4 border border-gray-200 bg-white rounded-lg hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer"
+                      onClick={() => handleLibraryClick(lib)}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-mono text-gray-500 truncate">{lib.id}</span>
+                            <Badge variant="outline" className="text-xs bg-green-500 text-white border-0 shrink-0">
+                              {lib.status}
+                            </Badge>
+                          </div>
+                          <h4 className="font-medium text-gray-900 truncate">{lib.name}</h4>
+                          {lib.description && (
+                            <p className="text-sm text-gray-500 mt-1 line-clamp-2">{lib.description}</p>
+                          )}
+                        </div>
+                        <div className="px-2 py-1 rounded text-xs font-medium border bg-blue-50 border-blue-200 text-blue-700 shrink-0">
+                          {lib.ruleCount} RULES
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 mt-3">
+                        <Badge variant="secondary" className="gap-1">
+                          <Library className="h-3 w-3" />
+                          Policy Library
+                        </Badge>
+                        <Badge variant="outline" className="gap-1 text-xs">
+                          {MODEL_ICON[lib.inferenceModel] ?? <Sparkles className="h-3 w-3" />}
+                          {MODEL_LABEL[lib.inferenceModel] ?? lib.inferenceModel?.replace(/_/g, " ")}
+                        </Badge>
+                        {lib.sourceFile && (
+                          <Badge variant="outline" className="text-xs bg-gray-50">
+                            {lib.sourceFile}
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-4 mt-3 text-xs text-gray-500 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatDate(lib.createdAt)}
+                        </span>
+                        <span
+                          className={cn(
+                            "px-1.5 py-0.5 rounded-full font-medium",
+                            lib.tier === "external" ? "bg-blue-100 text-blue-700" :
+                            lib.tier === "internal" ? "bg-purple-100 text-purple-700" :
+                            "bg-gray-100 text-gray-600",
+                          )}
+                        >
+                          {lib.tier}
+                        </span>
+                        {lib.componentName && (
+                          <span className="flex items-center gap-1 text-gray-400">
+                            <Link className="h-3 w-3" />
+                            {lib.componentName}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="border-t mt-6 mb-6" />
+              </div>
+            )}
+
             <div
               className={cn(
                 viewMode === "grid" ? "grid grid-cols-2 gap-4" : "space-y-3",
@@ -360,6 +484,14 @@ export default function PolicyKnowledgeLibrary() {
           setEditingRule(null);
         }}
         onSave={handleEdit}
+        filterOptions={filterOptions}
+      />
+
+      {/* Library Detail Drawer */}
+      <LibraryDetailDrawer
+        library={selectedLibrary}
+        open={librarySheetOpen}
+        onClose={() => setLibrarySheetOpen(false)}
         filterOptions={filterOptions}
       />
     </div>

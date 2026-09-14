@@ -13,7 +13,7 @@ import os
 import time
 import traceback
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -56,7 +56,19 @@ async def process_auto_approval_background(
 
     try:
         print(f"[CLIENT-AUTO-BG] Starting background processing for {message_id}")
-        
+
+        # Resolve component domains once — used for both input and output policy evaluation.
+        # The domain is declared at component registration, not inferred from content.
+        _component_domains: List[str] = []
+        if req.component_id:
+            try:
+                from modules.registry import db as reg_db
+                _component_domains = await reg_db.get_component_domains(req.component_id)
+                if _component_domains:
+                    print(f"[CLIENT-AUTO-BG] Component '{req.component_id}' domains: {_component_domains}")
+            except Exception as _e:
+                print(f"[CLIENT-AUTO-BG] Could not resolve component domains: {_e}")
+
         # ========== STEP 1: Evaluate Input Policy ==========
         print(f"[CLIENT-AUTO-BG] Evaluating input policies...")
         await event_bus.publish({
@@ -76,7 +88,9 @@ async def process_auto_approval_background(
         input_eval = await policy_engine.evaluate_content(
             content=req.message,
             policy_type="input",
-            context={"history": [h.model_dump() for h in req.history] if req.history else []}
+            context={"history": [h.model_dump() for h in req.history] if req.history else []},
+            domains=_component_domains or None,
+            component_id=req.component_id or None,
         )
         
         # Publish input policy evaluation event
@@ -283,7 +297,9 @@ async def process_auto_approval_background(
             context={
                 "original_message": req.message,
                 "history": [h.model_dump() for h in req.history] if req.history else []
-            }
+            },
+            domains=_component_domains or None,
+            component_id=req.component_id or None,
         )
         
         # Publish output policy evaluation event
@@ -527,6 +543,13 @@ async def client_message(
         from services.policy_engine import policy_engine
         try:
             print(f"[CLIENT-MANUAL] Evaluating input policies for {message_id}...")
+            _manual_domains: List[str] = []
+            if req.component_id:
+                try:
+                    from modules.registry import db as reg_db
+                    _manual_domains = await reg_db.get_component_domains(req.component_id)
+                except Exception as domain_error:
+                    print(f"[CLIENT-MANUAL] Could not resolve component domains: {domain_error}")
             await event_bus.publish({
                 "type": "policy_check_request",
                 "trace_id": trace_id,
@@ -544,7 +567,9 @@ async def client_message(
             input_eval = await policy_engine.evaluate_content(
                 content=req.message,
                 policy_type="input",
-                context={"history": [h.model_dump() for h in req.history] if req.history else []}
+                context={"history": [h.model_dump() for h in req.history] if req.history else []},
+                domains=_manual_domains or None,
+                component_id=req.component_id or None,
             )
             input_eval_data = {
                 "decision": input_eval.decision,

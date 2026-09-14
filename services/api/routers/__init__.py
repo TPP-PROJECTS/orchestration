@@ -10,6 +10,7 @@ from .policy import router as policy_router
 from .logs import router as logs_router
 from .comm_logs import router as comm_logs_router
 from .external_registry import router as external_registry_router
+from .inbound_events import router as inbound_events_router
 from modules.policy.router import router as knowledge_rules_router
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "logs_router",
     "comm_logs_router",
     "external_registry_router",
+    "inbound_events_router",
     "knowledge_rules_router",
 ]

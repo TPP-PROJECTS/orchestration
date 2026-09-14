@@ -245,6 +245,9 @@ export function AdminDashboard({
               violations: parsed.data.violations,
               summary: parsed.data.summary,
               evaluation_time_ms: parsed.data.evaluation_time_ms,
+              source: parsed.data.source,
+              url: parsed.data.url,
+              evaluated_content: parsed.data.evaluated_content,
             },
           };
 
@@ -440,6 +443,28 @@ export function AdminDashboard({
               reject_reason: parsed.data.reject_reason,
               edited_content: parsed.data.edited_content,
               timestamp: parsed.data.timestamp,
+            },
+          };
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === trace.id);
+            if (exists) return prev;
+            return [trace, ...prev].slice(0, 300);
+          });
+        }
+
+        if (parsed.type === "external_event") {
+          const trace: ChatTrace = {
+            id: `ext-${parsed.source}-${parsed.ts ?? Date.now()}`,
+            createdAt: parsed.ts ?? Date.now(),
+            payload: {
+              type: "external_event",
+              source: parsed.source,
+              method: parsed.data?.method,
+              url: parsed.data?.url,
+              status_code: parsed.data?.status_code,
+              duration_ms: parsed.data?.duration_ms,
+              request_body: parsed.data?.request_body,
+              response_body: parsed.data?.response_body,
             },
           };
           setTraces((prev) => {
@@ -837,7 +862,9 @@ export function AdminDashboard({
               triggerLiveScroll={triggerLiveScroll}
               autoMode={autoMode}
               onAutoModeChange={onAutoModeChange}
-              logs={httpLogs}
+              logs={httpLogs as any}
+              apiBase={API_BASE}
+              onNavigateToLogs={() => setActiveTab("logs")}
             />
           </TabsContent>
 

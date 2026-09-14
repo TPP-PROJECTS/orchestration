@@ -25,6 +25,8 @@ import {
   ChevronRight,
   ShieldCheck,
   ShieldAlert,
+  Activity,
+  ExternalLink,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
@@ -87,6 +89,8 @@ type PolicyViolationItem = {
   rule_content?: string;
   source_document?: string;
   source_section?: string;
+  library_id?: string;
+  library_name?: string;
 };
 
 type PolicyEvaluation = {
@@ -197,7 +201,7 @@ function JsonPanel({
             <Button
               variant="outline"
               size="sm"
-              className="text-white border-white hover:bg-white hover:text-black"
+              className="text-muted-foreground hover:text-foreground"
               onClick={() => void onCopy()}
             >
               <Copy className="h-4 w-4 mr-2" />
@@ -263,6 +267,8 @@ interface LiveTabProps {
   triggerLiveScroll?: number;
   autoMode?: boolean;
   onAutoModeChange?: (auto: boolean) => void;
+  apiBase?: string;
+  onNavigateToLogs?: () => void;
 }
 
 function LogDetailsDialog({
@@ -451,7 +457,7 @@ function LogDetailsDialog({
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-6 px-2"
+                              className="h-6 px-2 text-muted-foreground hover:text-foreground"
                               onClick={() => {
                                 navigator.clipboard.writeText(
                                   JSON.stringify(log.request_headers, null, 2),
@@ -493,7 +499,7 @@ function LogDetailsDialog({
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-6 px-2"
+                              className="h-6 px-2 text-muted-foreground hover:text-foreground"
                               onClick={() => {
                                 navigator.clipboard.writeText(
                                   JSON.stringify(log.response_headers, null, 2),
@@ -694,6 +700,22 @@ function PolicyEvaluationAlert({
                 </span>
               </div>
 
+              {/* Exact Policy Library provenance */}
+              {v.rule_id && v.rule_id !== "implicit" && (
+                <p className="text-muted-foreground mb-1">
+                  <span className="font-medium text-foreground/80">Rule ID:</span>{" "}
+                  <a
+                    href={`/api/knowledge-rules/${encodeURIComponent(v.rule_id)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono underline underline-offset-2 hover:text-foreground"
+                  >
+                    {v.rule_id}
+                  </a>
+                  {v.library_name && ` · Library: ${v.library_name}`}
+                </p>
+              )}
+
               {/* Description */}
               {v.rule_description && (
                 <p className="text-muted-foreground mb-1">
@@ -773,6 +795,8 @@ export function LiveTab({
   autoMode,
   onAutoModeChange,
   logs = [],
+  apiBase,
+  onNavigateToLogs,
 }: LiveTabProps & { logs?: HttpLog[] }): React.JSX.Element {
   const [logDialogOpen, setLogDialogOpen] = React.useState(false);
   const [logDialogPayload, setLogDialogPayload] = React.useState<Record<
@@ -794,11 +818,93 @@ export function LiveTab({
   const [showSecondaryRejectInput, setShowSecondaryRejectInput] =
     React.useState<boolean>(false);
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
+  const [flowDialogOpen, setFlowDialogOpen] = React.useState(false);
+  const [flowEntries, setFlowEntries] = React.useState<
+    Array<{ id: string; timestamp: number; role: string; preview: string }>
+  >([]);
+  const [flowLoading, setFlowLoading] = React.useState(false);
 
   const selected = React.useMemo(
     () => traces.find((t) => t.id === selectedId) ?? null,
     [traces, selectedId],
   );
+  const firstClientMessageId = React.useMemo(() => {
+    // traces is prepended newest-first, so the LAST client_message = oldest = End User → Orch
+    const msgs = traces.filter(
+      (t) => (t.payload as { type?: string })?.type === "client_message",
+    );
+    return msgs[msgs.length - 1]?.id ?? null;
+  }, [traces]);
+
+  const handleViewFlow = React.useCallback(
+    async (traceId: string) => {
+      if (!apiBase) return;
+      setFlowLoading(true);
+      setFlowDialogOpen(true);
+      setFlowEntries([]);
+      try {
+        const response = await fetch(`${apiBase}/api/comm-logs?limit=500`);
+        if (response.ok) {
+          const data = (await response.json()) as {
+            logs?: Array<{
+              id: string;
+              timestamp: number;
+              channel?: string;
+              payload?: Record<string, unknown>;
+            }>;
+          };
+          const allLogs = data.logs ?? [];
+          const filtered = allLogs.filter((log) => {
+            const p = log.payload;
+            if (!p) return false;
+            return (
+              p._session_id === traceId ||
+              p.trace_id === traceId
+            );
+          });
+          const getRole = (p: Record<string, unknown>): string => {
+            const msg = (p.message ?? {}) as Record<string, unknown>;
+            if (typeof msg.role === "string") return msg.role;
+            if (typeof p.role === "string") return p.role;
+            return "unknown";
+          };
+          const getPreview = (p: Record<string, unknown>): string => {
+            const msg = (p.message ?? {}) as Record<string, unknown>;
+            const content = msg.content ?? p.content;
+            if (typeof content === "string") return content.slice(0, 120);
+            if (Array.isArray(content)) {
+              const textItem = (
+                content as Array<{ type?: string; text?: string }>
+              ).find((c) => c.type === "text");
+              if (textItem?.text) return textItem.text.slice(0, 120);
+              if (
+                (content as Array<{ type?: string }>).some(
+                  (c) => c.type === "tool_use" || c.type === "tool_result",
+                )
+              )
+                return "(tool call)";
+            }
+            return "";
+          };
+          const entries = filtered
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .map((log) => ({
+              id: log.id,
+              timestamp: log.timestamp,
+              role: getRole(log.payload ?? {}),
+              preview: getPreview(log.payload ?? {}) || "(no preview)",
+            }));
+          setFlowEntries(entries);
+        }
+      } catch {
+        // ignore
+      } finally {
+        setFlowLoading(false);
+      }
+    },
+    [apiBase],
+  );
+
   const selectedTraceRef = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => {}, [traces]);
   React.useEffect(() => {
@@ -1057,7 +1163,10 @@ export function LiveTab({
             </Badge>
           </div>
           <div className="text-sm text-muted-foreground text-wrap">
-            {policyTypeStr} policy engine returned {badge.label} decision
+            {(payload as Record<string, unknown>).source
+              ? `[${(payload as Record<string, unknown>).source}] `
+              : ""}
+            {policyTypeStr} policy → {badge.label}
             {payload.summary ? `: ${payload.summary.slice(0, 80)}` : ""}
           </div>
           <div className="mt-1 text-xs text-gray-400">{when}</div>
@@ -1107,6 +1216,7 @@ export function LiveTab({
         : isAutoMode
           ? "Chat (Auto)"
           : "Chat";
+      const isFirstMessage = t.id === firstClientMessageId;
       return (
         <button
           key={t.id}
@@ -1119,7 +1229,7 @@ export function LiveTab({
         >
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-medium text-foreground flex-shrink-0">
-              Chat AI → Orch
+              {isFirstMessage ? "End User → Orch" : "Chat AI → Orch"}
             </span>
             <Badge className="text-xs flex-shrink-0 bg-green-600 text-white">
               Success
@@ -1311,6 +1421,42 @@ export function LiveTab({
       );
     }
 
+    if (payload?.type === "external_event") {
+      const p = payload as Record<string, unknown>;
+      const source = p.source as string | undefined;
+      const method = p.method as string | undefined;
+      const url = p.url as string | undefined;
+      const statusCode = p.status_code as number | undefined;
+      const durationMs = p.duration_ms as number | undefined;
+      const isOk = !statusCode || statusCode < 400;
+      return (
+        <button
+          key={t.id}
+          ref={isSelected ? selectedTraceRef : null}
+          onClick={() => onSelectedIdChange(t.id)}
+          className={[
+            "w-full text-left rounded-lg px-3 py-2 border transition-colors",
+            isSelected ? "bg-muted" : "bg-background hover:bg-muted/50",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-foreground flex-shrink-0">
+              {source ?? "External"} → Orch
+            </span>
+            <Badge
+              className={`text-xs flex-shrink-0 ${isOk ? "bg-blue-600 text-white" : "bg-red-600 text-white"}`}
+            >
+              {method ?? "REQUEST"}{statusCode ? ` ${statusCode}` : ""}
+            </Badge>
+          </div>
+          <div className="text-xs text-muted-foreground truncate">{url}</div>
+          <div className="mt-1 text-xs text-gray-400">
+            {when}{durationMs != null ? ` · ${durationMs}ms` : ""}
+          </div>
+        </button>
+      );
+    }
+
     return null;
   };
 
@@ -1351,6 +1497,7 @@ export function LiveTab({
   const isPolicyCheckRequest = traceType === "policy_check_request";
   const isClientMessage = traceType === "client_message";
   const isLlmResponse = traceType === "llm_response_ready";
+  const isExternalEvent = traceType === "external_event";
   const messageApprovedData = isMessageApproved
     ? {
         original_message: tryGet(selectedPayload, ["original_message"]),
@@ -1371,6 +1518,74 @@ export function LiveTab({
         selectedPayload={logDialogPayload ?? {}}
         logs={logs}
       />
+
+      {/* Flow Modal */}
+      <Dialog open={flowDialogOpen} onOpenChange={setFlowDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Conversation Flow</DialogTitle>
+            <DialogDescription>
+              LLM conversation flow entries for this trace
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {flowLoading ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+                Loading flow…
+              </div>
+            ) : flowEntries.length === 0 ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+                No flow entries found for this trace
+              </div>
+            ) : (
+              <div className="space-y-2 pr-1">
+                {flowEntries.map((entry, idx) => {
+                  const roleColor =
+                    entry.role === "user"
+                      ? "bg-blue-500/20 text-blue-300 border-blue-500/30"
+                      : entry.role === "assistant"
+                        ? "bg-green-500/20 text-green-300 border-green-500/30"
+                        : "bg-gray-500/20 text-gray-300 border-gray-500/30";
+                  return (
+                    <div
+                      key={entry.id}
+                      className="flex items-start gap-3 rounded-md bg-muted/40 px-3 py-2"
+                    >
+                      <span className="text-xs text-muted-foreground mt-0.5 shrink-0">
+                        {idx + 1}
+                      </span>
+                      <Badge
+                        className={`text-xs shrink-0 border ${roleColor}`}
+                      >
+                        {entry.role}
+                      </Badge>
+                      <span className="text-sm text-foreground whitespace-pre-wrap break-words min-w-0">
+                        {entry.preview}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {onNavigateToLogs && (
+            <DialogFooter className="border-t pt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setFlowDialogOpen(false);
+                  onNavigateToLogs();
+                }}
+                className="flex items-center gap-2"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open in Logs Tab
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* HITL Modal */}
       <Dialog
@@ -2500,6 +2715,27 @@ export function LiveTab({
                     </span>
                   </div>
                 </div>
+                {apiBase &&
+                  Array.isArray(selectedPayload.history) &&
+                  (selectedPayload.history as unknown[]).length > 0 && (
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        handleViewFlow(
+                          (selectedPayload.trace_id as string) ||
+                            (selectedPayload.message_id as string) ||
+                            selected!.id,
+                        )
+                      }
+                      className="flex items-center gap-2"
+                    >
+                      <Activity className="h-4 w-4" />
+                      View Flow
+                    </Button>
+                  </div>
+                )}
                 <JsonPanel title="Message" data={selectedPayload.message} />
                 {Array.isArray(selectedPayload.history) &&
                   selectedPayload.history.length > 0 && (
@@ -2584,9 +2820,14 @@ export function LiveTab({
                     policy_name?: string;
                     reason?: string;
                     suggestion?: string;
+                    library_id?: string;
+                    library_name?: string;
                   }>;
                   trace_id?: string;
                   message_id?: string;
+                  source?: string;
+                  url?: string;
+                  evaluated_content?: string;
                 };
                 const isBlock = pe.decision === "BLOCK";
                 const isWarn = pe.decision === "WARN";
@@ -2632,12 +2873,23 @@ export function LiveTab({
                           </span>
                         )}
                       </div>
+                      {pe.source && (
+                        <div className="text-xs text-muted-foreground">
+                          Source: <span className="font-mono">{pe.source}</span>
+                          {pe.url && <span className="ml-2 opacity-60 truncate">{pe.url}</span>}
+                        </div>
+                      )}
                       {pe.summary && (
                         <p className="text-sm text-muted-foreground">
                           {pe.summary}
                         </p>
                       )}
                     </div>
+
+                    {/* Evaluated content */}
+                    {pe.evaluated_content && (
+                      <JsonPanel title="Evaluated Content" data={pe.evaluated_content} />
+                    )}
 
                     {/* Violations list */}
                     {pe.violations && pe.violations.length > 0 && (
@@ -2680,6 +2932,20 @@ export function LiveTab({
                             {v.policy_name && (
                               <div className="text-xs text-muted-foreground">
                                 Policy: {v.policy_name}
+                              </div>
+                            )}
+                            {v.rule_id && v.rule_id !== "implicit" && (
+                              <div className="text-xs text-muted-foreground">
+                                Rule ID:{" "}
+                                <a
+                                  href={`/api/knowledge-rules/${encodeURIComponent(v.rule_id)}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-mono underline underline-offset-2 hover:text-foreground"
+                                >
+                                  {v.rule_id}
+                                </a>
+                                {v.library_name && ` · Library: ${v.library_name}`}
                               </div>
                             )}
                             <p className="text-sm">{v.reason}</p>
@@ -2762,6 +3028,53 @@ export function LiveTab({
                       />
                     )}
                     {lr.reply && <JsonPanel title="AI Reply" data={lr.reply} />}
+                  </div>
+                );
+              })()}
+
+            {/* ── External Event Detail ── */}
+            {isExternalEvent &&
+              (() => {
+                const ev = selectedPayload as {
+                  source?: string;
+                  method?: string;
+                  url?: string;
+                  status_code?: number;
+                  duration_ms?: number;
+                  request_body?: string;
+                  response_body?: string;
+                };
+                const isOk = !ev.status_code || ev.status_code < 400;
+                return (
+                  <div className="space-y-4 mt-2">
+                    <div className="rounded-lg border border-blue-500/50 bg-blue-500/10 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <ArrowDownLeft className="h-4 w-4 text-blue-400" />
+                        <span className="text-sm font-medium">
+                          {ev.source ?? "External"} → Orch
+                        </span>
+                        <Badge
+                          className={`text-xs ${isOk ? "bg-blue-600 text-white" : "bg-red-600 text-white"}`}
+                        >
+                          {ev.method ?? "REQUEST"}
+                          {ev.status_code ? ` ${ev.status_code}` : ""}
+                        </Badge>
+                        {ev.duration_ms != null && (
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {ev.duration_ms}ms
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground break-all">
+                        {ev.url}
+                      </p>
+                    </div>
+                    {ev.request_body && (
+                      <JsonPanel title="Request Body" data={ev.request_body} />
+                    )}
+                    {ev.response_body && (
+                      <JsonPanel title="Response Body" data={ev.response_body} />
+                    )}
                   </div>
                 );
               })()}

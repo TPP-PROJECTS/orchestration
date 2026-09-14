@@ -11,7 +11,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from modules.policy import db as policy_db
 
@@ -41,7 +41,7 @@ class KnowledgeRule(BaseModel):
     jurisdiction: List[str] = []
     intentType: str = ""
     scope: str = ""
-    enforcement: str = ""
+    enforcement: List[str] = []   # stored as list in DB
     strength: str = ""
     action: str = ""
     source: List[SourceDoc] = []
@@ -53,6 +53,25 @@ class KnowledgeRule(BaseModel):
     riskLevel: str = "medium"
     trustWorthy: str = ""
     changeLog: List[ChangeLogEntry] = []
+    # Three-tier fields
+    tier: Optional[str] = None
+    libraryId: Optional[str] = None
+    libraryName: Optional[str] = None
+    componentId: Optional[str] = None
+    componentName: Optional[str] = None
+    sourceFile: Optional[str] = None
+
+    model_config = {"extra": "ignore"}  # silently drop unknown DB fields
+
+    @field_validator("enforcement", mode="before")
+    @classmethod
+    def coerce_enforcement_to_list(cls, v: Any) -> List[str]:
+        """Old records store enforcement as a plain string; new ones as a list."""
+        if isinstance(v, str):
+            return [v] if v else []
+        if isinstance(v, list):
+            return v
+        return []
 
 
 class KnowledgeRuleCreate(BaseModel):
@@ -62,7 +81,7 @@ class KnowledgeRuleCreate(BaseModel):
     jurisdiction: List[str] = []
     intentType: str = ""
     scope: str = ""
-    enforcement: str = ""
+    enforcement: List[str] = []
     strength: str = ""
     action: str = ""
     source: List[SourceDoc] = []
@@ -72,6 +91,10 @@ class KnowledgeRuleCreate(BaseModel):
     status: str = "active"
     riskLevel: str = "medium"
     trustWorthy: str = ""
+    tier: Optional[str] = None
+    libraryId: Optional[str] = None
+    componentId: Optional[str] = None
+    componentName: Optional[str] = None
 
 
 class KnowledgeRuleUpdate(BaseModel):
@@ -81,7 +104,7 @@ class KnowledgeRuleUpdate(BaseModel):
     jurisdiction: Optional[List[str]] = None
     intentType: Optional[str] = None
     scope: Optional[str] = None
-    enforcement: Optional[str] = None
+    enforcement: Optional[List[str]] = None
     strength: Optional[str] = None
     action: Optional[str] = None
     source: Optional[List[SourceDoc]] = None
@@ -91,6 +114,7 @@ class KnowledgeRuleUpdate(BaseModel):
     status: Optional[str] = None
     riskLevel: Optional[str] = None
     trustWorthy: Optional[str] = None
+    tier: Optional[str] = None
 
 
 # ---- Endpoints ----
@@ -106,6 +130,7 @@ async def list_rules(
     status: List[str] = Query(default=[]),
     inference_model: List[str] = Query(default=[]),
     trust_worthy: List[str] = Query(default=[]),
+    library_id: str = Query(default=""),
     search: str = Query(default=""),
     sort_by: str = Query(default="lastModified"),
     limit: int = Query(default=200, le=500),
@@ -122,6 +147,7 @@ async def list_rules(
         statuses=status,
         inference_models=inference_model,
         trust_worthys=trust_worthy,
+        library_id=library_id,
         search=search,
         sort_by=sort_by,
         limit=limit,

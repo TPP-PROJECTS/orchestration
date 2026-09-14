@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Globe,
   Users,
+  Sparkles,
 } from "lucide-react";
 
 import type { FilterOptions, Rule, Action, RiskLevel } from "./types";
@@ -32,6 +33,7 @@ export const ICON_MAP: Record<string, ElementType> = {
   AlertCircle,
   Globe,
   Users,
+  Sparkles,
 };
 
 export const ICON_OPTIONS = Object.keys(ICON_MAP);
@@ -175,6 +177,12 @@ export const DEFAULT_FILTER_OPTIONS: FilterOptions = {
       label: "Neural Network",
       icon: "Cpu",
       description: "Deep learning models",
+    },
+    {
+      value: "general_llm",
+      label: "General LLM",
+      icon: "Sparkles",
+      description: "Extracted and evaluated by a general-purpose LLM",
     },
   ],
   trustWorthys: [

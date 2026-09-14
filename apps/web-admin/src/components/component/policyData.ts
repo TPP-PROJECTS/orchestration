@@ -527,4 +527,368 @@ export const mockPolicyRulesV2: PolicyRuleV2[] = [
     enabled: true,
     tags: ["monitoring", "metrics"],
   },
+
+  // ============ Topic Generator — Input Policies ============
+  {
+    id: "tg-in-001",
+    name: "Research Domain Scope Validation",
+    description:
+      "Reject inputs where the research domain is not a recognisable academic or scientific field",
+    content:
+      "The 'domain' field submitted to /topics/generate-profile must identify a legitimate academic or scientific discipline. Domains such as entertainment, marketing, or unrelated commercial activities must be rejected with a request to clarify the research context.",
+    requirement: "essential",
+    severity: "high",
+    enforcement: "block",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 2.1 — Input Domain Validation",
+    enabled: true,
+    tags: ["input", "topic-generator", "domain-validation", "academic"],
+  },
+  {
+    id: "tg-in-002",
+    name: "Custom Prompt Override Injection Guard",
+    description:
+      "Detect and block prompt-injection attempts in the custom_system_prompt field",
+    content:
+      "When a caller supplies a custom_system_prompt, the value must be scanned for jailbreak indicators: phrases such as 'ignore previous instructions', 'disregard your guidelines', 'you are now', 'act as', or base64-encoded blobs. Requests containing these patterns must be blocked and logged to the orchestration audit trail.",
+    requirement: "essential",
+    severity: "critical",
+    enforcement: "block",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 2.3 — Prompt Override Security",
+    enabled: true,
+    tags: ["input", "topic-generator", "prompt-injection", "security"],
+  },
+  {
+    id: "tg-in-003",
+    name: "Topic Generation Count Cap",
+    description: "Limit the maximum number of topics that can be requested in a single call",
+    content:
+      "The 'count' parameter in /topics/generate must not exceed 20. Requests with count > 20 must be rejected with HTTP 400. This prevents runaway API usage and ensures response quality remains high.",
+    requirement: "essential",
+    severity: "medium",
+    enforcement: "block",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 2.5 — Request Limits",
+    enabled: true,
+    tags: ["input", "topic-generator", "rate-limit", "api"],
+  },
+  {
+    id: "tg-in-004",
+    name: "Search Query Content Safety",
+    description:
+      "Validate that search queries submitted to /search are academic in nature and free of malicious content",
+    content:
+      "The 'query' field sent to /search must not contain HTML tags, script fragments, SQL keywords used as operators (e.g. DROP, SELECT *), or content unrelated to academic literature. Queries that appear designed to abuse external APIs (OpenAlex, PubMed) must be blocked.",
+    requirement: "essential",
+    severity: "high",
+    enforcement: "block",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 2.6 — Search Safety",
+    enabled: true,
+    tags: ["input", "topic-generator", "search", "xss", "injection"],
+  },
+  {
+    id: "tg-in-005",
+    name: "Query Generation Batch Size Limit",
+    description: "Cap the number of topics submitted to /queries/generate in one request",
+    content:
+      "The 'topics' array in /queries/generate must not exceed 10 items. Larger batches cause disproportionate model token usage and risk generating low-quality Boolean queries. Requests exceeding this limit must be rejected with HTTP 400.",
+    requirement: "essential",
+    severity: "medium",
+    enforcement: "block",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 2.8 — Batch Limits",
+    enabled: true,
+    tags: ["input", "topic-generator", "batch", "queries", "api"],
+  },
+
+  // ============ Topic Generator — Output Policies ============
+  {
+    id: "tg-out-001",
+    name: "No Fabricated Citations in AI Output",
+    description:
+      "AI-generated reasoning, synthesis, and gap analysis must not contain invented paper titles, author names, or DOIs presented as real sources",
+    content:
+      "Outputs from /topics/reason, /synthesis, and /gaps must not include specific bibliographic references (author names + year + title combinations) unless those references were extracted verbatim from user-supplied abstracts. The model must be instructed to avoid hallucinating citations. Any output flagged as containing a citation not traceable to input data must be blocked or redacted.",
+    requirement: "essential",
+    severity: "critical",
+    enforcement: "block",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.1 — Citation Integrity",
+    enabled: true,
+    tags: ["output", "topic-generator", "hallucination", "citation", "integrity"],
+  },
+  {
+    id: "tg-out-002",
+    name: "Boolean Search Query Format Compliance",
+    description:
+      "Generated search queries must be syntactically valid Boolean queries suitable for academic databases",
+    content:
+      "Output from /queries/generate must contain at least one Boolean operator (AND, OR, NOT), use parentheses for grouping where needed, and enclose multi-word phrases in double quotes. Queries that are plain keyword lists without any Boolean structure must trigger a warn-level flag and a suggestion to improve the query.",
+    requirement: "essential",
+    severity: "medium",
+    enforcement: "warn",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.2 — Query Format",
+    enabled: true,
+    tags: ["output", "topic-generator", "search-query", "boolean", "format"],
+  },
+  {
+    id: "tg-out-003",
+    name: "Confidence Score Honesty",
+    description:
+      "Topic confidence levels must accurately reflect profile completeness and not default to 'high' across all outputs",
+    content:
+      "When the researcher profile has fewer than 3 filled fields (domain, population, focus, method, reviewType), the AI must not assign 'high' confidence to all generated topics. At least one topic should reflect 'medium' or 'low' confidence to signal the impact of incomplete profile data. Outputs where all topics are uniformly 'high' confidence despite sparse input must be flagged.",
+    requirement: "essential",
+    severity: "medium",
+    enforcement: "warn",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.3 — Confidence Calibration",
+    enabled: true,
+    tags: ["output", "topic-generator", "confidence", "honesty", "calibration"],
+  },
+  {
+    id: "tg-out-004",
+    name: "Academic Tone Enforcement",
+    description:
+      "All AI-generated content must use formal academic language appropriate for a postgraduate research context",
+    content:
+      "Outputs from all topic-generator endpoints must avoid colloquialisms, first-person casual language ('I think', 'basically', 'kind of'), emojis, and marketing-style superlatives ('revolutionary', 'game-changing'). Outputs violating this standard should be flagged for tone at warn severity.",
+    requirement: "essential",
+    severity: "medium",
+    enforcement: "warn",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.4 — Academic Register",
+    enabled: true,
+    tags: ["output", "topic-generator", "tone", "academic", "language"],
+  },
+  {
+    id: "tg-out-005",
+    name: "Healthcare Domain Disclaimer Requirement",
+    description:
+      "Outputs in healthcare or clinical domains must include a non-clinical-advice disclaimer",
+    content:
+      "When the researcher profile domain contains 'health', 'medical', 'clinical', 'nursing', 'pharmacy', or 'surgery', AI outputs from /topics/generate-profile, /topics/reason, and /synthesis must append a disclaimer: 'This AI-generated content is for research scoping purposes only and does not constitute clinical, diagnostic, or treatment advice.' Outputs in these domains without such a disclaimer must be blocked.",
+    requirement: "essential",
+    severity: "critical",
+    enforcement: "block",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.5 — Healthcare Safety",
+    enabled: true,
+    tags: ["output", "topic-generator", "healthcare", "disclaimer", "safety"],
+  },
+  {
+    id: "tg-out-006",
+    name: "AI Synthesis Output Disclaimer",
+    description:
+      "Synthesis outputs must clearly state they are AI-generated and require researcher verification",
+    content:
+      "Every response from /synthesis must include the statement: 'This synthesis is AI-generated from the provided abstracts and should be independently verified before inclusion in a systematic review.' This disclaimer must appear at the start or end of the synthesis text and must not be overridden by a custom_system_prompt.",
+    requirement: "essential",
+    severity: "high",
+    enforcement: "warn",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.6 — AI Output Transparency",
+    enabled: true,
+    tags: ["output", "topic-generator", "synthesis", "disclaimer", "transparency"],
+  },
+  {
+    id: "tg-out-007",
+    name: "Gap Analysis Hedged Novelty Claims",
+    description:
+      "Gap analysis outputs must not assert absolute novelty; claims must be appropriately hedged",
+    content:
+      "Outputs from /gaps must not use absolute phrasing such as 'no research has ever examined', 'entirely unexplored', or 'completely absent from the literature'. Acceptable phrasing includes 'limited evidence exists', 'few studies have addressed', or 'the current literature lacks sufficient coverage of'. Absolute novelty claims must be downgraded to warn and reformulated.",
+    requirement: "essential",
+    severity: "medium",
+    enforcement: "warn",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.7 — Gap Analysis Accuracy",
+    enabled: true,
+    tags: ["output", "topic-generator", "gaps", "novelty", "hedging"],
+  },
+  {
+    id: "tg-out-008",
+    name: "Matrix Cell Source Transparency",
+    description:
+      "Autofill matrix cells must accurately distinguish between directly extracted and AI-inferred data",
+    content:
+      "The 'extractionMethod' field in /matrix autofill responses must be set to 'direct_quote' only when the value is verbatim or closely paraphrased from the supplied abstract. When the value is inferred, estimated, or not found in the abstract, the field must be set to 'inferred'. Misclassifying inferred data as direct_quote is a block-level violation.",
+    requirement: "essential",
+    severity: "high",
+    enforcement: "block",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.8 — Evidence Transparency",
+    enabled: true,
+    tags: ["output", "topic-generator", "matrix", "extraction", "transparency"],
+  },
+  {
+    id: "tg-out-009",
+    name: "Research Question Specificity Standard",
+    description:
+      "Final research questions must be specific and answerable by a systematic literature review",
+    content:
+      "Output from /final_question must produce a research question that includes at minimum: a defined population or context, a specific intervention or exposure or phenomenon, and a measurable outcome or comparison. Questions such as 'How does AI affect healthcare?' or 'What is the impact of X?' without population and outcome specificity must be flagged at warn severity with a reformulation suggestion.",
+    requirement: "essential",
+    severity: "medium",
+    enforcement: "warn",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.9 — Research Question Quality",
+    enabled: true,
+    tags: ["output", "topic-generator", "research-question", "pico", "specificity"],
+  },
+  {
+    id: "tg-out-010",
+    name: "Tag Academic Validity",
+    description:
+      "Generated topic tags must be valid academic keywords, preferably aligned with MeSH or established discipline thesauri",
+    content:
+      "Tags generated for research topics must be recognisable academic or MeSH-aligned terms. Tags that are generic non-academic words (e.g. 'stuff', 'things', 'various'), invented compound jargon, or promotional language must be flagged at warn severity. Outputs where more than 50% of tags are not recognisable academic terms must be regenerated.",
+    requirement: "recommended",
+    severity: "medium",
+    enforcement: "warn",
+    source_document: "Topic Generator Policy v1.0",
+    source_section: "Section 3.10 — Keyword Quality",
+    enabled: true,
+    tags: ["output", "topic-generator", "tags", "mesh", "keywords", "academic"],
+  },
+
+  // ============ Topic Generator — Research Ethics Policies ============
+  {
+    id: "tg-eth-001",
+    name: "Research Integrity — No Plagiarism Facilitation",
+    description:
+      "The system must not generate content designed to be submitted as original academic work without attribution",
+    content:
+      "Topic-generator outputs must not be structured as ready-to-submit thesis sections, journal article drafts, or assignment answers. When a user request pattern suggests the intent is to submit AI-generated text as their own work (e.g. 'write my literature review introduction'), the system must decline and redirect to scoping/planning assistance only.",
+    requirement: "essential",
+    severity: "critical",
+    enforcement: "block",
+    source_document: "Academic Integrity Framework",
+    source_section: "Section 1 — Authorship and Attribution",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "academic-integrity", "plagiarism"],
+  },
+  {
+    id: "tg-eth-002",
+    name: "Dual-Use Research of Concern (DURC) Flagging",
+    description:
+      "Research topics in biosecurity, synthetic biology, or pathogen enhancement must trigger an ethics advisory",
+    content:
+      "When a generated research topic involves gain-of-function research, pathogen enhancement, weaponisable biological or chemical agents, or dual-use life science research, the output must include a DURC advisory: 'This research area may fall under Dual-Use Research of Concern (DURC) guidelines. Consult your institution's biosafety committee and applicable national regulations before proceeding.' This advisory must not be suppressible by custom_system_prompt.",
+    requirement: "essential",
+    severity: "critical",
+    enforcement: "block",
+    source_document: "US NSABB DURC Policy 2012 / WHO Biosafety Manual",
+    source_section: "DURC Category Definition",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "durc", "biosafety", "dual-use"],
+  },
+  {
+    id: "tg-eth-003",
+    name: "Vulnerable Population Ethics Advisory",
+    description:
+      "Research topics involving children, prisoners, pregnant women, or other vulnerable groups must flag ethics review requirements",
+    content:
+      "When the 'population' field or topic description identifies minors (under 18), prisoners, people with cognitive impairment, pregnant women, or refugees as the study population, the system must append: 'Research involving this population typically requires enhanced ethics review. Ensure your protocol addresses additional safeguards for vulnerable participants as per your institution's IRB/ethics board requirements.'",
+    requirement: "essential",
+    severity: "high",
+    enforcement: "warn",
+    source_document: "Belmont Report / ICH E6 GCP",
+    source_section: "Special Populations Protection",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "vulnerable-populations", "irb", "safeguards"],
+  },
+  {
+    id: "tg-eth-004",
+    name: "Animal Research Ethics (IACUC) Alert",
+    description:
+      "Topics involving animal subjects must flag the requirement for ethics committee approval",
+    content:
+      "When a research topic involves animal models, in-vivo studies, or preclinical animal experiments, the output must include: 'Animal research requires approval from your institution's Institutional Animal Care and Use Committee (IACUC) or equivalent ethics body. Ensure your protocol addresses the 3Rs principles: Replacement, Reduction, and Refinement.'",
+    requirement: "essential",
+    severity: "high",
+    enforcement: "warn",
+    source_document: "ARRIVE Guidelines 2.0 / IACUC Policy",
+    source_section: "3Rs Framework",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "animal-research", "iacuc", "3rs"],
+  },
+  {
+    id: "tg-eth-005",
+    name: "Human Subjects Research — IRB Requirement Notice",
+    description:
+      "Topics requiring primary data collection from human participants must flag IRB/ethics board approval",
+    content:
+      "When the 'method' field includes qualitative interviews, surveys, RCTs, observational cohort studies, or any primary data collection involving human participants, the system must note: 'Research involving human participants requires prior approval from your Institutional Review Board (IRB) or Research Ethics Committee (REC). Ensure informed consent procedures are in place.'",
+    requirement: "essential",
+    severity: "high",
+    enforcement: "warn",
+    source_document: "Declaration of Helsinki / Common Rule (45 CFR 46)",
+    source_section: "Informed Consent and Ethics Review",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "human-subjects", "irb", "consent"],
+  },
+  {
+    id: "tg-eth-006",
+    name: "Research Misconduct Prevention",
+    description:
+      "The system must not assist with selective reporting, p-hacking, HARKing, or outcome switching",
+    content:
+      "Topic-generator must not generate search queries or synthesis guidance that is explicitly designed to cherry-pick results, post-hoc rationalise hypotheses (HARKing), or support selective outcome reporting. When a request explicitly asks to 'find only studies that support X' or 'exclude studies showing negative results', the system must refuse and explain the need for pre-registered, unbiased systematic review methodology.",
+    requirement: "essential",
+    severity: "critical",
+    enforcement: "block",
+    source_document: "COPE Guidelines / Cochrane Handbook",
+    source_section: "Reporting Bias and Research Integrity",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "misconduct", "p-hacking", "reporting-bias"],
+  },
+  {
+    id: "tg-eth-007",
+    name: "Conflicts of Interest Disclosure Reminder",
+    description:
+      "Research topics involving commercial products, funders, or industry partnerships must prompt COI disclosure",
+    content:
+      "When a research topic involves evaluating a commercial product, pharmaceutical, medical device, or is scoped in a way that could benefit a named commercial entity, the output must include: 'Systematic reviews in this area may require explicit conflict of interest (COI) declarations. Ensure all authors disclose funding sources and relationships with relevant industry stakeholders per ICMJE guidelines.'",
+    requirement: "conditional",
+    severity: "medium",
+    enforcement: "warn",
+    source_document: "ICMJE Recommendations / PRISMA 2020",
+    source_section: "Conflicts of Interest Disclosure",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "coi", "disclosure", "industry"],
+  },
+  {
+    id: "tg-eth-008",
+    name: "Indigenous Data Sovereignty (CARE Principles)",
+    description:
+      "Research topics involving indigenous communities or data must acknowledge data sovereignty requirements",
+    content:
+      "When a research topic or population field references indigenous peoples, First Nations, Aboriginal, or Native communities, the output must append: 'Research involving indigenous communities or data should adhere to the CARE Principles for Indigenous Data Governance (Collective Benefit, Authority to Control, Responsibility, Ethics) and engage community partners early in the research design process.'",
+    requirement: "conditional",
+    severity: "high",
+    enforcement: "warn",
+    source_document: "CARE Principles for Indigenous Data Governance (2020)",
+    source_section: "Indigenous Data Sovereignty Framework",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "indigenous", "care-principles", "data-sovereignty"],
+  },
+  {
+    id: "tg-eth-009",
+    name: "Sensitive Topic Balanced Representation",
+    description:
+      "Topics involving race, religion, gender, sexuality, or political ideology must be handled with balanced, non-partisan framing",
+    content:
+      "When generated research topics or reasoning outputs address race, ethnicity, religion, gender identity, sexual orientation, or political ideology, the system must frame content neutrally, represent multiple scholarly perspectives, and avoid language that could be construed as advocating for one position. Outputs that contain ideologically loaded framing must be flagged at warn severity.",
+    requirement: "essential",
+    severity: "high",
+    enforcement: "warn",
+    source_document: "IEEE 7000-2021 / APA Ethics Code",
+    source_section: "Principle E: Respect for People's Rights and Dignity",
+    enabled: true,
+    tags: ["ethics", "topic-generator", "sensitive-topics", "neutrality", "bias"],
+  },
 ];

@@ -181,7 +181,9 @@ async def evaluate_content(request: PolicyEvaluationRequest) -> PolicyEvaluation
     result = await policy_engine.evaluate_content(
         content=request.content,
         policy_type=request.policy_type,
-        context=request.context
+        context=request.context,
+        domains=request.domains,
+        component_id=request.component_id,
     )
     return result
 

@@ -26,7 +26,7 @@ from cryptography.hazmat.primitives.serialization import (
     Encoding,
     PublicFormat,
 )
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
 from services.event_bus import event_bus
@@ -52,6 +52,9 @@ class ExternalComponent(BaseModel):
     error_message: Optional[str] = None
     trustWorthys: Optional[List[str]] = None
     trustWorthyDescription: Optional[str] = None
+    # User-defined domains for policy search (free-form text)
+    domains: List[str] = []
+    policy_search_status: str = "none"  # none | searching | done | error
     created_at: float
     updated_at: float
 
@@ -64,6 +67,9 @@ class RegisterRequest(BaseModel):
     auth_token: Optional[str] = None
     trustWorthys: Optional[List[str]] = None
     trustWorthyDescription: Optional[str] = None
+    # Free-form domain tags — used to search for applicable external regulations
+    # e.g. ["K-12 student data privacy", "AI tutoring systems"]
+    domains: List[str] = []
 
 
 class RegisterResponse(BaseModel):
@@ -88,7 +94,13 @@ async def list_components() -> List[ExternalComponent]:
 
 @router.post("/components", response_model=RegisterResponse)
 async def register_component(req: RegisterRequest) -> RegisterResponse:
-    """Register a new external component."""
+    """
+    Register a new external component.
+
+    If `domains` are provided, an Anthropic web search is triggered in the
+    background to find applicable external regulations and store them as
+    knowledge rules (tier=external) for this component.
+    """
     comp_id = f"ext-{uuid.uuid4().hex[:8]}"
     now = time.time()
     comp = ExternalComponent(
@@ -101,11 +113,50 @@ async def register_component(req: RegisterRequest) -> RegisterResponse:
         status="registered",
         trustWorthys=req.trustWorthys,
         trustWorthyDescription=req.trustWorthyDescription,
+        domains=req.domains,
+        policy_search_status="none" if not req.domains else "searching",
         created_at=now,
         updated_at=now,
     )
     _components[comp_id] = comp
+
+    if req.domains:
+        asyncio.create_task(_run_policy_search(comp_id, req.domains, req.name))
+
     return RegisterResponse(id=comp_id, name=comp.name, status=comp.status)
+
+
+async def _run_policy_search(comp_id: str, domains: List[str], comp_name: str) -> None:
+    """Background task: search external policies and update component status."""
+    try:
+        from services.policy_search import search_and_store_external_policies
+        result = await search_and_store_external_policies(domains, comp_id, comp_name)
+        status = "error" if result["errors"] and not result["rules_created"] else "done"
+    except Exception as exc:
+        print(f"[EXTERNAL-REGISTRY] Policy search failed for {comp_id}: {exc}")
+        status = "error"
+
+    if comp_id in _components:
+        comp = _components[comp_id]
+        comp.policy_search_status = status
+        comp.updated_at = time.time()
+        _components[comp_id] = comp
+
+
+@router.patch("/components/{comp_id}")
+async def update_component(comp_id: str, updates: Dict[str, Any]) -> ExternalComponent:
+    """Update mutable fields of a registered external component."""
+    if comp_id not in _components:
+        raise HTTPException(status_code=404, detail="Component not found")
+    comp = _components[comp_id]
+    allowed = {"name", "description", "endpoint", "auth_token", "connection_type",
+               "trustWorthys", "trustWorthyDescription", "domains"}
+    for key, val in updates.items():
+        if key in allowed and val is not None:
+            setattr(comp, key, val)
+    comp.updated_at = time.time()
+    _components[comp_id] = comp
+    return comp
 
 
 @router.delete("/components/{comp_id}")
@@ -132,6 +183,117 @@ async def test_component(comp_id: str) -> Dict[str, Any]:
         return await _test_ws(comp, start)
     else:
         return await _test_http(comp, start)
+
+
+@router.post("/components/{comp_id}/policies")
+async def upload_component_policies(
+    comp_id: str,
+    files: List[UploadFile] = File(...),
+) -> Dict[str, Any]:
+    """
+    Upload one or more internal policy documents for a registered external component.
+
+    Each file is read as UTF-8 text and stored as knowledge rules in MongoDB with
+    tier=internal so the policy engine applies them when this component is active.
+
+    Supported formats: plain text (.txt), markdown (.md), PDF text (.pdf treated as text).
+    """
+    if comp_id not in _components:
+        raise HTTPException(status_code=404, detail="Component not found")
+
+    comp = _components[comp_id]
+    created_rule_ids: List[str] = []
+    errors: List[str] = []
+
+    try:
+        from modules.policy import db as policy_db
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Policy database unavailable: {exc}")
+
+    for upload in files:
+        try:
+            raw = await upload.read()
+            text = raw.decode("utf-8", errors="replace").strip()
+            if not text:
+                errors.append(f"{upload.filename}: empty file")
+                continue
+
+            # Split document into chunks — one knowledge rule per logical paragraph
+            # (paragraphs separated by blank lines), max 2000 chars each.
+            paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+            # Merge very short fragments into the previous paragraph
+            chunks: List[str] = []
+            for para in paragraphs:
+                if chunks and len(chunks[-1]) + len(para) < 2000 and len(para) < 100:
+                    chunks[-1] = chunks[-1] + " " + para
+                else:
+                    chunks.append(para[:2000])
+
+            filename = upload.filename or "policy_document"
+            now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+            for i, chunk in enumerate(chunks, start=1):
+                rule_id = str(uuid.uuid4())
+                rule = {
+                    "id": rule_id,
+                    "title": f"{filename} — §{i}",
+                    "summary": chunk,
+                    "domain": ["General"],
+                    "tier": "internal",
+                    "componentId": comp_id,
+                    "componentName": comp.name,
+                    "sourceFile": filename,
+                    "status": "active",
+                    "enforcement": ["pre_check", "post_check", "in_flight"],
+                    "strength": "must",
+                    "action": "deny",
+                    "riskLevel": "high",
+                    "jurisdiction": [],
+                    "intentType": "internal_policy",
+                    "scope": "component",
+                    "lastModified": now_iso,
+                }
+                await policy_db.create_rule(rule)
+                created_rule_ids.append(rule_id)
+
+        except Exception as exc:
+            errors.append(f"{upload.filename}: {exc}")
+
+    return {
+        "component_id": comp_id,
+        "rules_created": len(created_rule_ids),
+        "rule_ids": created_rule_ids,
+        "errors": errors,
+    }
+
+
+@router.get("/components/{comp_id}/policies")
+async def list_component_policies(comp_id: str) -> Dict[str, Any]:
+    """List internal policy rules uploaded for a component."""
+    if comp_id not in _components:
+        raise HTTPException(status_code=404, detail="Component not found")
+    try:
+        from modules.policy import db as policy_db
+        rules = await policy_db.list_rules(tiers=["internal"], component_id=comp_id, limit=500)
+        return {"component_id": comp_id, "rules": rules, "total": len(rules)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.delete("/components/{comp_id}/policies")
+async def delete_component_policies(comp_id: str) -> Dict[str, Any]:
+    """Delete all internal policy rules for a component."""
+    if comp_id not in _components:
+        raise HTTPException(status_code=404, detail="Component not found")
+    try:
+        from modules.policy import db as policy_db
+        from core.db_base import get_module_db, POLICY_DB
+        result = await get_module_db(POLICY_DB)["knowledge_rules"].delete_many(
+            {"tier": "internal", "componentId": comp_id}
+        )
+        return {"component_id": comp_id, "deleted": result.deleted_count}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 async def _test_http(comp: ExternalComponent, start: float) -> Dict[str, Any]:
@@ -1017,6 +1179,13 @@ async def external_chat(req: ExternalChatRequest) -> ExternalChatResponse:
     trace_id = req.trace_id or str(uuid.uuid4())
     ts = int(time.time() * 1000)
 
+    component_domains: List[str] = []
+    try:
+        from modules.registry import db as reg_db
+        component_domains = await reg_db.get_component_domains(req.component_id)
+    except Exception as domain_error:
+        print(f"[EXTERNAL-CHAT] Could not resolve component domains: {domain_error}")
+
     # ── 1. Input policy ──────────────────────────────────────────────────────
     input_eval_data: Optional[Dict[str, Any]] = None
     try:
@@ -1029,6 +1198,8 @@ async def external_chat(req: ExternalChatRequest) -> ExternalChatResponse:
                 "history": req.history or [],
                 "meta": req.meta or {},
             },
+            domains=component_domains or None,
+            component_id=req.component_id,
         )
         input_eval_data = {
             "decision": input_eval.decision,
@@ -1071,6 +1242,8 @@ async def external_chat(req: ExternalChatRequest) -> ExternalChatResponse:
                 "original_message": req.message,
                 "history": req.history or [],
             },
+            domains=component_domains or None,
+            component_id=req.component_id,
         )
         output_eval_data = {
             "decision": output_eval.decision,

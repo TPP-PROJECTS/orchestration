@@ -19,6 +19,27 @@ export interface Rule {
   riskLevel: RiskLevel;
   trustWorthy: TrustWorthy;
   changeLog: ChangeLogEntry[];
+  // Three-tier policy fields
+  tier?: "external" | "internal" | "implicit";
+  libraryId?: string;
+  libraryName?: string;
+  componentId?: string;
+  componentName?: string;
+  sourceFile?: string;
+}
+
+export interface PolicyLibrary {
+  id: string;
+  name: string;
+  description?: string;
+  tier: "external" | "internal";
+  inferenceModel: string;
+  sourceFile?: string;
+  componentId?: string;
+  componentName?: string;
+  ruleCount: number;
+  status: string;
+  createdAt: string;
 }
 
 export type InferenceModel =

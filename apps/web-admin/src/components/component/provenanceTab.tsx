@@ -19,7 +19,7 @@ type ProvEvent = {
   actor?: string | null;
   module_id?: string | null;
   envelope_type?: string | null;
-  input_ref?: unknown;
+  input_ref?: Record<string, any>;
   output_ref?: unknown;
   policy_ref?: unknown;
   meta?: unknown;
