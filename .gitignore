@@ -10,6 +10,34 @@ Thumbs.db
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Claude
 .claude/
+
+# Codex
+.codex/
+.codex-tmp/
+codex-*/
+*.codex
+
+# Docs & local design materials
+docs/
+*.docx
+*.pptx
+*.pdf
+orchestration-architecture-*.png
+
+# Office lock files
+~$*
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.log
+
+# Python
+__pycache__/
+*.pyc

@@ -2,7 +2,21 @@
 // Fetches rules from the backend API (GET /api/knowledge-rules).
 // Supports create, edit, and delete via API.
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { Search, X, FileText, Plus, ArrowUpDown, Loader2, Library, Shield, Sparkles, Database, Globe, Cpu, Link, Clock } from "lucide-react";
+import {
+  Search,
+  X,
+  FileText,
+  Plus,
+  ArrowUpDown,
+  Loader2,
+  Library,
+  Sparkles,
+  Database,
+  Globe,
+  Cpu,
+  Link,
+  Clock,
+} from "lucide-react";
 // Library/Shield/Sparkles/Database/Globe/Cpu/Link/Clock used in library card render below
 
 import { Button } from "@/components/ui/button";
@@ -35,12 +49,6 @@ async function fetchLibraries(): Promise<PolicyLibrary[]> {
   return res.json();
 }
 
-async function fetchRulesByLibrary(libraryId: string): Promise<Rule[]> {
-  const res = await fetch(`${API_BASE}?library_id=${encodeURIComponent(libraryId)}&limit=500`);
-  if (!res.ok) return [];
-  return res.json();
-}
-
 const MODEL_LABEL: Record<string, string> = {
   general_llm: "LLM",
   rdr: "RDR",
@@ -49,19 +57,16 @@ const MODEL_LABEL: Record<string, string> = {
 };
 
 const MODEL_ICON: Record<string, React.ReactNode> = {
-  rdr:             <Database className="h-3 w-3" />,
+  rdr: <Database className="h-3 w-3" />,
   knowledge_graph: <Globe className="h-3 w-3" />,
-  neural_network:  <Cpu className="h-3 w-3" />,
-  general_llm:     <Sparkles className="h-3 w-3" />,
+  neural_network: <Cpu className="h-3 w-3" />,
+  general_llm: <Sparkles className="h-3 w-3" />,
 };
 
-const TIER_STYLE: Record<string, string> = {
-  external: "bg-blue-50 border-blue-200 text-blue-800",
-  internal: "bg-purple-50 border-purple-200 text-purple-800",
-  implicit: "bg-gray-50 border-gray-200 text-gray-700",
-};
-
-async function fetchRules(filters: FilterState, sortBy: string): Promise<Rule[]> {
+async function fetchRules(
+  filters: FilterState,
+  sortBy: string,
+): Promise<Rule[]> {
   const params = new URLSearchParams();
   filters.domains.forEach((v) => params.append("domain", v));
   filters.jurisdictions.forEach((v) => params.append("jurisdiction", v));
@@ -112,7 +117,9 @@ export default function PolicyKnowledgeLibrary() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedLibrary, setSelectedLibrary] = useState<PolicyLibrary | null>(null);
+  const [selectedLibrary, setSelectedLibrary] = useState<PolicyLibrary | null>(
+    null,
+  );
   const [librarySheetOpen, setLibrarySheetOpen] = useState(false);
 
   const [filters, setFilters] = useState<FilterState>({
@@ -134,7 +141,6 @@ export default function PolicyKnowledgeLibrary() {
 
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const viewMode: "list" | "grid" = "list";
   const [sortBy, setSortBy] = useState<string>("lastModified");
 
   const [newRuleDialogOpen, setNewRuleDialogOpen] = useState(false);
@@ -160,7 +166,9 @@ export default function PolicyKnowledgeLibrary() {
   }, [loadRules]);
 
   useEffect(() => {
-    fetchLibraries().then(setLibraries).catch(() => {});
+    fetchLibraries()
+      .then(setLibraries)
+      .catch(() => {});
   }, []);
 
   // ---- Client-side sort (backend returns pre-sorted, this is a safety net) ----
@@ -176,7 +184,10 @@ export default function PolicyKnowledgeLibrary() {
           return a.title.localeCompare(b.title);
         case "riskLevel": {
           const riskOrder: Record<string, number> = {
-            critical: 0, high: 1, medium: 2, low: 3,
+            critical: 0,
+            high: 1,
+            medium: 2,
+            low: 3,
           };
           return (riskOrder[a.riskLevel] ?? 4) - (riskOrder[b.riskLevel] ?? 4);
         }
@@ -298,7 +309,8 @@ export default function PolicyKnowledgeLibrary() {
                       })
                     }
                   >
-                    {filterOptions.domains.find((dom) => dom.value === d)?.label || d}
+                    {filterOptions.domains.find((dom) => dom.value === d)
+                      ?.label || d}
                     <X className="h-3 w-3" />
                   </Badge>
                 ))}
@@ -314,7 +326,8 @@ export default function PolicyKnowledgeLibrary() {
                       })
                     }
                   >
-                    {filterOptions.statuses.find((st) => st.value === s)?.label || s}
+                    {filterOptions.statuses.find((st) => st.value === s)
+                      ?.label || s}
                     <X className="h-3 w-3" />
                   </Badge>
                 ))}
@@ -363,14 +376,23 @@ export default function PolicyKnowledgeLibrary() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-mono text-gray-500 truncate">{lib.id}</span>
-                            <Badge variant="outline" className="text-xs bg-green-500 text-white border-0 shrink-0">
+                            <span className="text-xs font-mono text-gray-500 truncate">
+                              {lib.id}
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className="text-xs bg-green-500 text-white border-0 shrink-0"
+                            >
                               {lib.status}
                             </Badge>
                           </div>
-                          <h4 className="font-medium text-gray-900 truncate">{lib.name}</h4>
+                          <h4 className="font-medium text-gray-900 truncate">
+                            {lib.name}
+                          </h4>
                           {lib.description && (
-                            <p className="text-sm text-gray-500 mt-1 line-clamp-2">{lib.description}</p>
+                            <p className="text-sm text-gray-500 mt-1 line-clamp-2">
+                              {lib.description}
+                            </p>
                           )}
                         </div>
                         <div className="px-2 py-1 rounded text-xs font-medium border bg-blue-50 border-blue-200 text-blue-700 shrink-0">
@@ -384,11 +406,17 @@ export default function PolicyKnowledgeLibrary() {
                           Policy Library
                         </Badge>
                         <Badge variant="outline" className="gap-1 text-xs">
-                          {MODEL_ICON[lib.inferenceModel] ?? <Sparkles className="h-3 w-3" />}
-                          {MODEL_LABEL[lib.inferenceModel] ?? lib.inferenceModel?.replace(/_/g, " ")}
+                          {MODEL_ICON[lib.inferenceModel] ?? (
+                            <Sparkles className="h-3 w-3" />
+                          )}
+                          {MODEL_LABEL[lib.inferenceModel] ??
+                            lib.inferenceModel?.replace(/_/g, " ")}
                         </Badge>
                         {lib.sourceFile && (
-                          <Badge variant="outline" className="text-xs bg-gray-50">
+                          <Badge
+                            variant="outline"
+                            className="text-xs bg-gray-50"
+                          >
                             {lib.sourceFile}
                           </Badge>
                         )}
@@ -402,9 +430,11 @@ export default function PolicyKnowledgeLibrary() {
                         <span
                           className={cn(
                             "px-1.5 py-0.5 rounded-full font-medium",
-                            lib.tier === "external" ? "bg-blue-100 text-blue-700" :
-                            lib.tier === "internal" ? "bg-purple-100 text-purple-700" :
-                            "bg-gray-100 text-gray-600",
+                            lib.tier === "external"
+                              ? "bg-blue-100 text-blue-700"
+                              : lib.tier === "internal"
+                                ? "bg-purple-100 text-purple-700"
+                                : "bg-gray-100 text-gray-600",
                           )}
                         >
                           {lib.tier}
@@ -423,11 +453,7 @@ export default function PolicyKnowledgeLibrary() {
               </div>
             )}
 
-            <div
-              className={cn(
-                viewMode === "grid" ? "grid grid-cols-2 gap-4" : "space-y-3",
-              )}
-            >
+            <div className="space-y-3">
               {sortedRules.map((rule) => (
                 <RuleCard
                   key={rule.id}
